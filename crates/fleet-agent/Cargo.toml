@@ -9,3 +9,5 @@ fleet-core = { path = "../fleet-core" }
 axum = "0.8"
 serde.workspace = true
 tokio.workspace = true
+reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
+sha2 = "0.10"

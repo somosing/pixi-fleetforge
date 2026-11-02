@@ -26,6 +26,9 @@ fn release_request(binary_path: &Path, version: &str) -> DeploymentRequest {
         artifact_path: binary_path.to_owned(),
         sha256: sha256_file(binary_path).unwrap(),
         artifact_kind: ArtifactKind::Executable,
+        health_command: None,
+        health_timeout_ms: None,
+        run_command: None,
     }
 }
 
@@ -172,4 +175,51 @@ fn startup_cleans_orphaned_staging_artifacts() {
     );
     assert!(!orphaned_staging.exists());
     assert!(!orphaned_release.exists());
+}
+
+#[test]
+fn health_check_timeout_preserves_last_healthy_release() {
+    let test_root = tempfile::tempdir().unwrap();
+    let mut robot_agent = apply_first_release(&test_root);
+    let slow_binary = test_root.path().join("slow.sh");
+    fs::write(&slow_binary, "#!/bin/sh\nsleep 5\n").unwrap();
+    fs::set_permissions(&slow_binary, fs::Permissions::from_mode(0o755)).unwrap();
+    let mut deployment = release_request(&slow_binary, "2.0.0");
+    deployment.health_timeout_ms = Some(150);
+    let robot_state = robot_agent.deploy(deployment).unwrap();
+    assert_eq!(robot_state.phase, DeploymentPhase::RolledBack);
+    assert_eq!(robot_state.active_version.as_deref(), Some("1.0.0"));
+}
+
+#[test]
+fn absolute_health_command_is_rejected() {
+    let test_root = tempfile::tempdir().unwrap();
+    let mut robot_agent = apply_first_release(&test_root);
+    let next_binary = write_test_binary(test_root.path(), "2.0.0", true);
+    let mut deployment = release_request(&next_binary, "2.0.0");
+    deployment.health_command = Some(vec!["/usr/bin/true".to_owned()]);
+    assert!(robot_agent.deploy(deployment).is_err());
+}
+
+#[test]
+fn runtime_failure_reverts_active_version() {
+    let test_root = tempfile::tempdir().unwrap();
+    let mut robot_agent = apply_first_release(&test_root);
+    let second_binary = write_test_binary(test_root.path(), "2.0.0", true);
+    let mut deployment = release_request(&second_binary, "2.0.0");
+    deployment.run_command = Some(vec!["robot-app".to_owned(), "--serve".to_owned()]);
+    assert_eq!(
+        robot_agent.deploy(deployment).unwrap().phase,
+        DeploymentPhase::Healthy
+    );
+    let command = robot_agent.active_run_command().unwrap().unwrap();
+    assert_eq!(command.0, "2.0.0");
+    assert_eq!(
+        robot_agent
+            .mark_runtime_failure("2.0.0")
+            .unwrap()
+            .active_version
+            .as_deref(),
+        Some("1.0.0")
+    );
 }

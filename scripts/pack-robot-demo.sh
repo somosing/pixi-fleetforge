@@ -9,6 +9,11 @@ if ! command -v pixi-pack >/dev/null 2>&1; then
     exit 1
 fi
 
+if [ ! -f "$repo_root/robot-demo/pixi.lock" ]; then
+    echo "Generating robot-demo/pixi.lock before packaging"
+    pixi install --manifest-path robot-demo/pixi.toml
+fi
+
 pixi-pack --platform linux-64 robot-demo/pixi.toml
 
 archive_path="$repo_root/environment.tar"

@@ -1,95 +1,143 @@
-# FleetForge
+# FleetForge — Robot Software Fleet Deployment
 
-**Failure-aware robot software deployment — Rust + Pixi, local prototype v0.1.0**
+**Rust + Tokio + Pixi + SHA-256 artifact registry + polling reconciliation + peer-assisted distribution + SvelteKit**
 
-FleetForge explores a small but real piece of robot fleet management: distributing a release to independent robot agents while protecting the last working version when packaging or health validation fails.
+FleetForge is a **local Linux engineering prototype** built to explore reproducible software deployments across multiple robot agents, with failure-aware release activation and recovery. It is not a production robotics system and has not been tested on physical hardware.
 
-This is a learning and engineering prototype, **not** a deployed production fleet manager. Distributed peer discovery, gossip, ROS 2 supervision and the web UI are not implemented in v0.1.
+## Status at package delivery
 
-## Implemented
+- v0.1 baseline: user validated **7 Rust tests**, Rust formatting/Clippy, the three-agent rollback demo, Pixi environment packaging and a real unpacked Python 3.13.18 release. Published at [somosing/pixi-fleetforge](https://github.com/somosing/pixi-fleetforge).
+- Expanded package: new hub, reconciliation loop, remote hash-verified artifacts, peer-assisted HTTP fetch, release health timeouts, optional application supervision, SvelteKit dashboard, Rust integration tests, demo scripts, optional RoboStack ROS 2 heartbeat, and standalone libp2p gossip experiment. **Not yet compiled or tested end-to-end in this package-generation environment.** Validate locally before pushing.
 
-- Rust `fleet-core` deployment state machine with persisted state and restart recovery.
-- SHA-256 validation **before** activation; version identifiers are validated against path traversal.
-- Staged release directories and atomic replacement of the local `state.json` file on Linux.
-- Health-check rejection and restoration of the previous active release identifier.
-- Pixi archive deployment via `pixi-pack` and `pixi-unpack` with a basic unpacked-Python health check.
-- HTTP robot agent with `GET /state`, `GET /healthz`, `POST /deploy` (local loopback only).
-- Concurrent controller commands for multiple robot agent endpoints.
-- Rust tests, a three-agent demonstration, GitHub Actions and a failure model.
+## Architecture
 
-## Run with Pixi (Ubuntu/Linux x86-64)
+```text
+SvelteKit dashboard --(HTTP + token)--> fleet-hub (desired state, artifact registry)
+                                         |     ^          ^
+                         agent polling   |     |          | uploads
+                                         v     |          |
+                                       robot agents   fleet-controller CLI
+                                         |    |
+                                  verified Pixi artifacts
+                                  health-check gate, rollback
+                                  optional runtime supervisor
+```
 
-Install [Pixi](https://pixi.prefix.dev/latest/installation/) first.
+The hub is authoritative for desired versions; the agents are responsible for local safe operation. A disconnected agent retains the last deployed software and resumes polling when the hub returns.
+
+## Requirements
+
+- Ubuntu Linux x86-64 with Pixi, a C/C++ build toolchain and internet for first dependency installation.
+- `python3`, `curl` for example scripts.
+- Node.js 22+ for the SvelteKit dashboard.
+- `pixi-pack`/`pixi-unpack` for environment packaging (the lightweight robot environment was already tested on Ubuntu).
+
+## Build and verify
 
 ```bash
 pixi install
-pixi run check
+pixi run cargo fmt --all
+pixi run fmt
+pixi run clippy
 pixi run test
 pixi run demo
+pixi run demo-full
+pixi run demo-peer
 ```
 
-The environment specification is provided as `pixi.toml`. The initial prototype cannot ship a verified `pixi.lock` until dependency resolution is run on an internet-connected development machine. Generate and commit the lockfile before describing the build as fully locked.
+The expanded Rust workspace adds crates, so it may update `Cargo.lock`. Apply the downloaded source using [UPGRADE.md](UPGRADE.md) rather than replacing your existing Git history. Commit both Pixi and Cargo lockfiles after successful resolution. The GitHub Actions workflow checks formatting, Clippy, tests, demos, and the dashboard build.
 
-Alternatively, with Rust and Cargo already installed:
+## Local fleet control demo
+
+`pixi run demo-full` starts one hub and three independent agent processes, uploads two hash-checked release artifacts, assigns version `1.0.0` to all three robots, then deploys deliberately unhealthy `2.0.0` to robot 3. It expects robot 3 to return to `1.0.0` and prints the hub's fleet observations. Temporary state and processes are cleaned on exit.
+
+`pixi run demo-peer` starts two agents. Robot 1 downloads a release from the hub and caches it. The script removes that artifact from the hub, then asks robot 2 to deploy the same digest through its configured peer `robot-1`. Success demonstrates HTTP peer-assisted, hash-verified artifact delivery, **not** libp2p-integrated delivery.
+
+## Manual hub, agent and controller
+
+Set a non-production local token in each shell:
 
 ```bash
-cargo test --workspace
-bash scripts/demo.sh
+export FLEETFORGE_TOKEN='replace-with-at-least-16-characters'
 ```
 
-The demonstration starts **three actual agent processes** on ports 4301–4303. It deploys a healthy shell executable to all three, attempts an unhealthy release on robot 3, and shows the resulting rollback. These robots are independent local processes, not simulated physical robot hardware.
+In separate terminals from the repository root:
 
-## Pack and deploy a Pixi environment
+```bash
+pixi run cargo run -p fleet-hub -- ./state/hub 127.0.0.1:4500
+pixi run cargo run -p fleet-agent -- robot-1 ./state/robot-1 127.0.0.1:4511 http://127.0.0.1:4500
+pixi run cargo run -p fleet-controller -- fleet http://127.0.0.1:4500
+```
 
-Install the Pixi packaging tools:
+To publish an executable or Pixi archive:
+
+```bash
+pixi run cargo run -p fleet-controller -- publish /absolute/path/to/artifact http://127.0.0.1:4500
+```
+
+Create a local JSON rollout manifest, replacing the digest with the 64-digit SHA-256 printed by `publish`:
+
+```json
+{
+  "robot_ids": ["robot-1"],
+  "release": {
+    "version": "1.0.0",
+    "sha256": "REPLACE_WITH_64_HEX_DIGITS",
+    "artifact_kind": "executable",
+    "health_command": ["robot-app", "--health-check"],
+    "health_timeout_ms": 10000,
+    "run_command": ["robot-app", "--serve"]
+  }
+}
+```
+
+Save the JSON to `rollout.json` and run:
+
+```bash
+pixi run cargo run -p fleet-controller -- rollout rollout.json http://127.0.0.1:4500
+pixi run cargo run -p fleet-controller -- fleet http://127.0.0.1:4500
+```
+
+`run_command` is optional and is appropriate only for long-running robot applications. Without it, the release is validated but no application process is supervised.
+
+## Pixi environment deployment
 
 ```bash
 pixi global install pixi-pack pixi-unpack
+pixi install --manifest-path robot-demo/pixi.toml
 bash scripts/pack-robot-demo.sh
 ```
 
-This builds `environment.tar` and a local manifest at `robot-demo/pixi-release.json`. The archive is ignored by Git. Launch an agent in another terminal:
+The pack script creates a 64-digit digest and `robot-demo/pixi-release.json`. The local agent must have `pixi-unpack` on `PATH`. The default Pixi archive health contract is `env/bin/python --version`, which verifies a packaged interpreter, **not** full ROS operation. For manually specified contracts, binaries must be relative to the release root (e.g. `env/bin/python`) and the command must exit successfully within the timeout.
+
+## Dashboard
 
 ```bash
-pixi run cargo run -p fleet-agent -- robot-pixi ./state/robot-pixi 127.0.0.1:4401
+cd dashboard
+npm install
+npm run check
+npm run dev
 ```
 
-Then deploy:
+Open `http://127.0.0.1:5173`, connect to your locally running hub, and enter the same `FLEETFORGE_TOKEN`. It displays observed robot states, desired releases and freshness, and can assign desired versions for artifacts already uploaded through the CLI. The token is held in page memory only.
 
-```bash
-pixi run cargo run -p fleet-controller -- deploy robot-demo/pixi-release.json http://127.0.0.1:4401
-```
+## Optional research components
 
-The agent needs `pixi-unpack` on `PATH`. The archive is verified before unpacking. For the Pixi mode, the current health contract only tests `env/bin/python --version`.
+- `robot-demo/ros2`: independent RoboStack Jazzy Pixi environment, a ROS 2 heartbeat publisher and a five-second health probe. **Not yet integrated into a packaged release lifecycle.**
+- `experiments/fleet-gossip`: standalone Rust libp2p signed-gossipsub peer lab. **Not integrated into FleetForge's authority or artifact path.** Its peer identities are ephemeral and do not establish fleet authorization.
 
-## Manual API example
+## Documentation
 
-The controller accepts local URLs, for example:
+- [Architecture, control and deployment flow](docs/architecture.md)
+- [Failure cases and verification matrix](docs/failure-model.md)
+- [Pixi experiments and improvement worksheet](docs/pixi-experiments.md)
+- [ROS 2 optional experiment](robot-demo/ros2/README.md)
+- [libp2p gossip experiment](experiments/fleet-gossip/README.md)
 
-```bash
-cargo run -p fleet-controller -- status http://127.0.0.1:4301 http://127.0.0.1:4302
-cargo run -p fleet-controller -- deploy release.json http://127.0.0.1:4301
-```
+## Security and caveats
 
-An executable manifest is a JSON object with `version`, absolute `artifact_path`, its `sha256` and `artifact_kind: "executable"`. The referenced file must exist on the robot agent's machine and respond successfully to `--health-check`.
-
-## Design notes
-
-- [Architecture and deployment state machine](docs/architecture.md)
-- [Failure model, test coverage and gaps](docs/failure-model.md)
-- [Pixi reproducibility and improvement experiments](docs/pixi-experiments.md)
-
-## Roadmap
-
-1. **v0.1** — local artifact integrity, rollback, restart recovery and Pixi archive support.
-2. **v0.2** — configurable agent health contracts, timeouts, safe process supervision, a real artifact registry and authenticated requests.
-3. **v0.3** — bounded rollouts, libp2p peer discovery, digest-addressed artifact cache, offline reconciliation.
-4. **v0.4** — RoboStack ROS 2 diagnostic node and SvelteKit operator dashboard.
-
-## Security and limitations
-
-This code is intentionally restricted to loopback connections. An agent currently accepts a manifest containing a local artifact path and executes it. SHA-256 verifies bytes against a **caller-supplied** hash, not the publisher's identity. Do not expose the API to a network or use it on physical robots. There is no authentication, signature verification, deployment timeout, running-process switch, or operational safety policy.
+**Loopback-only. Never deploy to physical robots or expose ports to untrusted networks.** The shared bearer token is a local demonstration control, not identity/authorization suitable for production. Artifacts are hash-verified, not publisher-signed. HTTP is unencrypted. There is no sandbox, hardened secrets storage, fleet-wide rollback policy, remote secure transport or robot operational safety controller. Process health checks and supervision are deliberately basic. Offline operation means preserving previously running software; it does not guarantee that a disconnected robot can obtain a desired release without a peer or cached artifact.
 
 ## License
 
-MIT — see [LICENSE](LICENSE).
+MIT, see [LICENSE](LICENSE).

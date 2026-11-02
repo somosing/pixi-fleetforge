@@ -1,0 +1,13 @@
+[workspace]
+name = "fleetforge-ros2-diagnostics"
+version = "0.1.0"
+channels = ["https://prefix.dev/robostack-jazzy", "conda-forge"]
+platforms = ["linux-64"]
+
+[dependencies]
+ros-jazzy-ros-base = "*"
+python = ">=3.11,<3.13"
+
+[tasks]
+publisher = "python heartbeat_node.py"
+health = "python ros_health_probe.py"
