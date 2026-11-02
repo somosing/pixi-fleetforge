@@ -18,7 +18,9 @@ async fn main() -> ExitCode {
 
 async fn operate_fleet() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let arguments: Vec<String> = std::env::args().skip(1).collect();
-    let client = reqwest::Client::builder().timeout(Duration::from_secs(60)).build()?;
+    let client = reqwest::Client::builder()
+        .timeout(Duration::from_secs(60))
+        .build()?;
     let token = std::env::var("FLEETFORGE_TOKEN").ok();
     match arguments.as_slice() {
         [command, agents @ ..] if command == "status" && !agents.is_empty() => {
@@ -58,11 +60,12 @@ async fn operate_fleet() -> Result<(), Box<dyn std::error::Error + Send + Sync>>
     }
 }
 
-fn authenticated(
-    request: reqwest::RequestBuilder,
-    token: Option<&str>,
-) -> reqwest::RequestBuilder {
-    if let Some(token) = token { request.bearer_auth(token) } else { request }
+fn authenticated(request: reqwest::RequestBuilder, token: Option<&str>) -> reqwest::RequestBuilder {
+    if let Some(token) = token {
+        request.bearer_auth(token)
+    } else {
+        request
+    }
 }
 
 async fn dispatch_requests(
@@ -87,7 +90,9 @@ async fn dispatch_requests(
             } else {
                 client.get(&endpoint_url)
             };
-            let response = authenticated(request, access_token.as_deref()).send().await?;
+            let response = authenticated(request, access_token.as_deref())
+                .send()
+                .await?;
             let status = response.status();
             let body = response.text().await?;
             Ok::<_, reqwest::Error>((agent_url, status, body))
@@ -98,7 +103,9 @@ async fn dispatch_requests(
         match join_outcome {
             Ok(Ok((agent_url, status, body))) => {
                 println!("{agent_url} [{status}] {body}");
-                if !status.is_success() { failure_count += 1; }
+                if !status.is_success() {
+                    failure_count += 1;
+                }
             }
             Ok(Err(network_error)) => {
                 eprintln!("Network failure: {network_error}");
@@ -110,6 +117,9 @@ async fn dispatch_requests(
             }
         }
     }
-    if failure_count > 0 { Err(format!("{failure_count} agent requests failed").into()) }
-    else { Ok(()) }
+    if failure_count > 0 {
+        Err(format!("{failure_count} agent requests failed").into())
+    } else {
+        Ok(())
+    }
 }

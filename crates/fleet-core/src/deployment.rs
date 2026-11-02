@@ -139,7 +139,10 @@ impl DeploymentEngine {
             if engine.robot_state.phase == DeploymentPhase::Activating {
                 engine.robot_state.active_version = engine.robot_state.previous_version.clone();
             } else if engine.robot_state.phase == DeploymentPhase::Staging {
-                let orphaned_release = engine.state_root.join("releases").join(&interrupted_version);
+                let orphaned_release = engine
+                    .state_root
+                    .join("releases")
+                    .join(&interrupted_version);
                 if orphaned_release.exists() {
                     fs::remove_dir_all(orphaned_release)?;
                 }
@@ -164,10 +167,7 @@ impl DeploymentEngine {
         self.robot_state.clone()
     }
 
-    pub fn deploy(
-        &mut self,
-        deployment: DeploymentRequest,
-    ) -> Result<RobotState, DeploymentError> {
+    pub fn deploy(&mut self, deployment: DeploymentRequest) -> Result<RobotState, DeploymentError> {
         validate_identifier(&deployment.version)?;
         validate_digest(&deployment.sha256)?;
         let health_spec = build_health_spec(&deployment)?;
@@ -228,7 +228,10 @@ impl DeploymentEngine {
             }
 
             if let Some(run_command) = &deployment.run_command {
-                fs::write(staging_dir.join("run-command.json"), serde_json::to_vec(run_command)?)?;
+                fs::write(
+                    staging_dir.join("run-command.json"),
+                    serde_json::to_vec(run_command)?,
+                )?;
             }
             fs::rename(&staging_dir, &release_dir)?;
             Ok(())
@@ -271,21 +274,31 @@ impl DeploymentEngine {
         Ok(self.state())
     }
 
-    pub fn active_run_command(&self) -> Result<Option<(String, PathBuf, Vec<String>)>, DeploymentError> {
-        let Some(active_version) = &self.robot_state.active_version else { return Ok(None); };
+    pub fn active_run_command(
+        &self,
+    ) -> Result<Option<(String, PathBuf, Vec<String>)>, DeploymentError> {
+        let Some(active_version) = &self.robot_state.active_version else {
+            return Ok(None);
+        };
         let release_root = self.state_root.join("releases").join(active_version);
         let run_manifest = release_root.join("run-command.json");
-        if !run_manifest.exists() { return Ok(None); }
+        if !run_manifest.exists() {
+            return Ok(None);
+        }
         let run_command: Vec<String> = serde_json::from_slice(&fs::read(run_manifest)?)?;
         validate_release_command(&run_command)?;
         Ok(Some((active_version.clone(), release_root, run_command)))
     }
 
-    pub fn mark_runtime_failure(&mut self, failed_version: &str) -> Result<RobotState, DeploymentError> {
+    pub fn mark_runtime_failure(
+        &mut self,
+        failed_version: &str,
+    ) -> Result<RobotState, DeploymentError> {
         if self.robot_state.active_version.as_deref() == Some(failed_version) {
             self.robot_state.active_version = self.robot_state.previous_version.clone();
             self.robot_state.phase = DeploymentPhase::RolledBack;
-            self.robot_state.detail = format!("Release {failed_version} exited unexpectedly; previous version selected");
+            self.robot_state.detail =
+                format!("Release {failed_version} exited unexpectedly; previous version selected");
             self.robot_state.pending_version = None;
             self.persist_state()?;
         }
@@ -326,7 +339,10 @@ pub fn sha256_file(binary_path: &Path) -> Result<String, DeploymentError> {
 }
 
 fn validate_identifier(identifier: &str) -> Result<(), DeploymentError> {
-    let valid_start = identifier.chars().next().is_some_and(|letter| letter.is_ascii_alphanumeric());
+    let valid_start = identifier
+        .chars()
+        .next()
+        .is_some_and(|letter| letter.is_ascii_alphanumeric());
     let valid_characters = identifier
         .chars()
         .all(|letter| letter.is_ascii_alphanumeric() || matches!(letter, '-' | '_' | '.'));
@@ -362,7 +378,9 @@ fn build_health_spec(deployment: &DeploymentRequest) -> Result<HealthSpec, Deplo
     let relative_path = Path::new(executable);
     let timeout_ms = deployment.health_timeout_ms.unwrap_or(10_000);
     if !(100..=120_000).contains(&timeout_ms) {
-        return Err(DeploymentError::InvalidHealthCommand(format!("timeout {timeout_ms} ms outside 100..120000")));
+        return Err(DeploymentError::InvalidHealthCommand(format!(
+            "timeout {timeout_ms} ms outside 100..120000"
+        )));
     }
     Ok(HealthSpec {
         executable: relative_path.to_path_buf(),
@@ -382,12 +400,16 @@ fn run_health_check(release_dir: &Path, health: &HealthSpec) -> Result<(), Deplo
             if exit_status.success() {
                 return Ok(());
             }
-            return Err(DeploymentError::InvalidHealthCommand(format!("health command exited with {exit_status}")));
+            return Err(DeploymentError::InvalidHealthCommand(format!(
+                "health command exited with {exit_status}"
+            )));
         }
         if started_at.elapsed() >= health.timeout {
             health_process.kill()?;
             health_process.wait()?;
-            return Err(DeploymentError::InvalidHealthCommand("health command timed out".to_owned()));
+            return Err(DeploymentError::InvalidHealthCommand(
+                "health command timed out".to_owned(),
+            ));
         }
         thread::sleep(Duration::from_millis(25));
     }
@@ -395,10 +417,15 @@ fn run_health_check(release_dir: &Path, health: &HealthSpec) -> Result<(), Deplo
 
 fn validate_release_command(command: &[String]) -> Result<(), DeploymentError> {
     let Some(executable) = command.first() else {
-        return Err(DeploymentError::InvalidHealthCommand("empty release command".to_owned()));
+        return Err(DeploymentError::InvalidHealthCommand(
+            "empty release command".to_owned(),
+        ));
     };
     let executable_path = Path::new(executable);
-    if !executable_path.components().all(|component| matches!(component, std::path::Component::Normal(_))) {
+    if !executable_path
+        .components()
+        .all(|component| matches!(component, std::path::Component::Normal(_)))
+    {
         return Err(DeploymentError::InvalidHealthCommand(executable.to_owned()));
     }
     Ok(())

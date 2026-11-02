@@ -59,7 +59,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     } else {
         HubStore::default()
     };
-    let shared_hub = Arc::new(HubState { root, bearer_token, registry: Mutex::new(registry) });
+    let shared_hub = Arc::new(HubState {
+        root,
+        bearer_token,
+        registry: Mutex::new(registry),
+    });
     let cors = CorsLayer::new()
         .allow_origin(Any)
         .allow_methods([Method::GET, Method::POST, Method::PUT])
@@ -70,7 +74,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .route("/api/desired", post(set_desired))
         .route("/api/desired/{robot_id}", get(get_desired))
         .route("/api/heartbeat", post(record_heartbeat))
-        .route("/api/artifacts/{sha256}", get(get_artifact).put(put_artifact))
+        .route(
+            "/api/artifacts/{sha256}",
+            get(get_artifact).put(put_artifact),
+        )
         .layer(DefaultBodyLimit::max(100 * 1024 * 1024))
         .layer(cors)
         .with_state(shared_hub);
@@ -81,18 +88,30 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 }
 
 fn authorized(headers: &HeaderMap, hub: &HubState) -> Result<(), HubFailure> {
-    let supplied = headers.get(header::AUTHORIZATION).and_then(|value| value.to_str().ok());
+    let supplied = headers
+        .get(header::AUTHORIZATION)
+        .and_then(|value| value.to_str().ok());
     if supplied != Some(format!("Bearer {}", hub.bearer_token).as_str()) {
-        return Err((StatusCode::UNAUTHORIZED, "Invalid fleet access token".to_owned()));
+        return Err((
+            StatusCode::UNAUTHORIZED,
+            "Invalid fleet access token".to_owned(),
+        ));
     }
     Ok(())
 }
 
 fn validate_digest(sha256: &str) -> Result<(), HubFailure> {
-    if sha256.len() == 64 && sha256.bytes().all(|character| character.is_ascii_hexdigit()) {
+    if sha256.len() == 64
+        && sha256
+            .bytes()
+            .all(|character| character.is_ascii_hexdigit())
+    {
         Ok(())
     } else {
-        Err((StatusCode::BAD_REQUEST, "Invalid artifact digest".to_owned()))
+        Err((
+            StatusCode::BAD_REQUEST,
+            "Invalid artifact digest".to_owned(),
+        ))
     }
 }
 
@@ -102,7 +121,10 @@ async fn fleet_snapshot(
 ) -> Result<Json<FleetSnapshot>, HubFailure> {
     authorized(&headers, &hub)?;
     let registry = hub.registry.lock().map_err(lock_error)?;
-    Ok(Json(FleetSnapshot { desired: registry.desired.clone(), observed: registry.observed.clone() }))
+    Ok(Json(FleetSnapshot {
+        desired: registry.desired.clone(),
+        observed: registry.observed.clone(),
+    }))
 }
 
 async fn set_desired(
@@ -113,16 +135,36 @@ async fn set_desired(
     authorized(&headers, &hub)?;
     validate_digest(&rollout.release.sha256)?;
     let version = &rollout.release.version;
-    if version.is_empty() || version.len() > 64
-        || !version.bytes().next().is_some_and(|letter| letter.is_ascii_alphanumeric())
-        || !version.bytes().all(|letter| letter.is_ascii_alphanumeric() || matches!(letter, b'-' | b'_' | b'.')) {
-        return Err((StatusCode::BAD_REQUEST, "Invalid release version".to_owned()));
+    if version.is_empty()
+        || version.len() > 64
+        || !version
+            .bytes()
+            .next()
+            .is_some_and(|letter| letter.is_ascii_alphanumeric())
+        || !version
+            .bytes()
+            .all(|letter| letter.is_ascii_alphanumeric() || matches!(letter, b'-' | b'_' | b'.'))
+    {
+        return Err((
+            StatusCode::BAD_REQUEST,
+            "Invalid release version".to_owned(),
+        ));
     }
     if rollout.robot_ids.is_empty() || rollout.robot_ids.len() > 50 {
-        return Err((StatusCode::BAD_REQUEST, "Rollout must target 1 to 50 robots".to_owned()));
+        return Err((
+            StatusCode::BAD_REQUEST,
+            "Rollout must target 1 to 50 robots".to_owned(),
+        ));
     }
-    if rollout.robot_ids.iter().any(|robot_id| !valid_robot_id(robot_id)) {
-        return Err((StatusCode::BAD_REQUEST, "Invalid robot identifier".to_owned()));
+    if rollout
+        .robot_ids
+        .iter()
+        .any(|robot_id| !valid_robot_id(robot_id))
+    {
+        return Err((
+            StatusCode::BAD_REQUEST,
+            "Invalid robot identifier".to_owned(),
+        ));
     }
     let mut registry = hub.registry.lock().map_err(lock_error)?;
     for robot_id in rollout.robot_ids {
@@ -150,17 +192,24 @@ async fn record_heartbeat(
     authorized(&headers, &hub)?;
     let robot_id = heartbeat.state.robot_id.clone();
     if !valid_robot_id(&robot_id) {
-        return Err((StatusCode::BAD_REQUEST, "Invalid robot identifier".to_owned()));
+        return Err((
+            StatusCode::BAD_REQUEST,
+            "Invalid robot identifier".to_owned(),
+        ));
     }
-    let last_seen_ms = SystemTime::now().duration_since(UNIX_EPOCH)
+    let last_seen_ms = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
         .map_err(|error| (StatusCode::INTERNAL_SERVER_ERROR, error.to_string()))?
         .as_millis() as u64;
     let mut registry = hub.registry.lock().map_err(lock_error)?;
-    registry.observed.insert(robot_id, RobotObservation {
-        state: heartbeat.state,
-        last_seen_ms,
-        endpoint: heartbeat.endpoint,
-    });
+    registry.observed.insert(
+        robot_id,
+        RobotObservation {
+            state: heartbeat.state,
+            last_seen_ms,
+            endpoint: heartbeat.endpoint,
+        },
+    );
     persist_registry(&hub.root, &registry).map_err(io_error)?;
     Ok(StatusCode::NO_CONTENT)
 }
@@ -175,12 +224,19 @@ async fn put_artifact(
     validate_digest(&sha256)?;
     let canonical_digest = sha256.to_ascii_lowercase();
     let artifact_path = hub.root.join("artifacts").join(&canonical_digest);
-    let staged_path = hub.root.join("artifacts").join(format!(".{canonical_digest}.upload"));
+    let staged_path = hub
+        .root
+        .join("artifacts")
+        .join(format!(".{canonical_digest}.upload"));
     fs::write(&staged_path, payload).map_err(io_error)?;
-    let actual_digest = sha256_file(&staged_path).map_err(|error| io_error(std::io::Error::other(error)))?;
+    let actual_digest =
+        sha256_file(&staged_path).map_err(|error| io_error(std::io::Error::other(error)))?;
     if actual_digest != sha256.to_ascii_lowercase() {
         let _ = fs::remove_file(&staged_path);
-        return Err((StatusCode::BAD_REQUEST, "Artifact SHA-256 mismatch".to_owned()));
+        return Err((
+            StatusCode::BAD_REQUEST,
+            "Artifact SHA-256 mismatch".to_owned(),
+        ));
     }
     fs::rename(&staged_path, artifact_path).map_err(io_error)?;
     Ok(StatusCode::CREATED)
@@ -210,12 +266,18 @@ fn persist_registry(root: &Path, registry: &HubStore) -> Result<(), std::io::Err
 }
 
 fn valid_robot_id(robot_id: &str) -> bool {
-    !robot_id.is_empty() && robot_id.len() <= 64
-        && robot_id.bytes().all(|character| character.is_ascii_alphanumeric() || matches!(character, b'-' | b'_'))
+    !robot_id.is_empty()
+        && robot_id.len() <= 64
+        && robot_id
+            .bytes()
+            .all(|character| character.is_ascii_alphanumeric() || matches!(character, b'-' | b'_'))
 }
 
 fn lock_error<T>(_: T) -> HubFailure {
-    (StatusCode::INTERNAL_SERVER_ERROR, "Fleet registry lock failure".to_owned())
+    (
+        StatusCode::INTERNAL_SERVER_ERROR,
+        "Fleet registry lock failure".to_owned(),
+    )
 }
 
 fn io_error(error: std::io::Error) -> HubFailure {

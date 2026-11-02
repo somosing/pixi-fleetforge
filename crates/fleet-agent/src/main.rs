@@ -8,8 +8,8 @@ use fleet_core::{
 };
 use serde::Serialize;
 use std::fs;
-use std::os::unix::fs::PermissionsExt;
 use std::net::SocketAddr;
+use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
@@ -81,7 +81,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 }
 
 async fn get_state(State(agent): State<SharedAgent>) -> Result<Json<RobotState>, ApiFailure> {
-    let engine = agent.engine.lock().map_err(|_| internal_error("Agent state lock poisoned"))?;
+    let engine = agent
+        .engine
+        .lock()
+        .map_err(|_| internal_error("Agent state lock poisoned"))?;
     Ok(Json(engine.state()))
 }
 
@@ -93,15 +96,25 @@ async fn deploy_release(
     authorized(&headers, &agent)?;
     let deployment_engine = Arc::clone(&agent.engine);
     tokio::task::spawn_blocking(move || {
-        let mut engine = deployment_engine.lock().map_err(|_| internal_error("Agent state lock poisoned"))?;
-        engine.deploy(deployment).map(Json).map_err(|deployment_error| {
-            let status_code = if deployment_error.is_invalid_request() {
-                StatusCode::BAD_REQUEST
-            } else {
-                StatusCode::INTERNAL_SERVER_ERROR
-            };
-            (status_code, Json(ApiError { message: deployment_error.to_string() }))
-        })
+        let mut engine = deployment_engine
+            .lock()
+            .map_err(|_| internal_error("Agent state lock poisoned"))?;
+        engine
+            .deploy(deployment)
+            .map(Json)
+            .map_err(|deployment_error| {
+                let status_code = if deployment_error.is_invalid_request() {
+                    StatusCode::BAD_REQUEST
+                } else {
+                    StatusCode::INTERNAL_SERVER_ERROR
+                };
+                (
+                    status_code,
+                    Json(ApiError {
+                        message: deployment_error.to_string(),
+                    }),
+                )
+            })
     })
     .await
     .map_err(|worker_error| internal_error(&format!("Deployment task failed: {worker_error}")))?
@@ -116,24 +129,41 @@ async fn get_cached_artifact(
     if !valid_digest(&sha256) {
         return Err(bad_request("Invalid artifact digest"));
     }
-    let artifact_path = agent.state_root.join("cache").join(sha256.to_ascii_lowercase());
+    let artifact_path = agent
+        .state_root
+        .join("cache")
+        .join(sha256.to_ascii_lowercase());
     let content = fs::read(artifact_path).map_err(|_| {
-        (StatusCode::NOT_FOUND, Json(ApiError { message: "Artifact not cached".to_owned() }))
+        (
+            StatusCode::NOT_FOUND,
+            Json(ApiError {
+                message: "Artifact not cached".to_owned(),
+            }),
+        )
     })?;
     Ok(Bytes::from(content))
 }
 
 async fn reconcile_loop(agent: SharedAgent, hub_url: String) {
-    let client = match reqwest::Client::builder().timeout(Duration::from_secs(30)).build() {
+    let client = match reqwest::Client::builder()
+        .timeout(Duration::from_secs(30))
+        .build()
+    {
         Ok(client) => client,
         Err(client_error) => {
-            eprintln!("{}: HTTP initialization failed: {client_error}", agent.robot_id);
+            eprintln!(
+                "{}: HTTP initialization failed: {client_error}",
+                agent.robot_id
+            );
             return;
         }
     };
     loop {
         if let Err(reconcile_error) = reconcile_once(&client, &agent, &hub_url).await {
-            eprintln!("{}: reconciliation deferred: {reconcile_error}", agent.robot_id);
+            eprintln!(
+                "{}: reconciliation deferred: {reconcile_error}",
+                agent.robot_id
+            );
         }
         tokio::time::sleep(Duration::from_secs(4)).await;
     }
@@ -145,46 +175,79 @@ async fn reconcile_once(
     hub_url: &str,
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let token = agent.token.as_deref().ok_or("Missing fleet token")?;
-    let latest_state = agent.engine.lock().map_err(|_| "Agent state lock poisoned")?.state();
+    let latest_state = agent
+        .engine
+        .lock()
+        .map_err(|_| "Agent state lock poisoned")?
+        .state();
     let heartbeat = AgentHeartbeat {
         state: latest_state.clone(),
         endpoint: Some(format!("http://{}", agent.listen_address)),
     };
-    client.post(format!("{hub_url}/api/heartbeat"))
+    client
+        .post(format!("{hub_url}/api/heartbeat"))
         .bearer_auth(token)
         .json(&heartbeat)
-        .send().await?.error_for_status()?;
+        .send()
+        .await?
+        .error_for_status()?;
 
-    let desired: Option<ReleaseTarget> = client.get(format!("{hub_url}/api/desired/{}", agent.robot_id))
+    let desired: Option<ReleaseTarget> = client
+        .get(format!("{hub_url}/api/desired/{}", agent.robot_id))
         .bearer_auth(token)
-        .send().await?.error_for_status()?.json().await?;
-    let Some(target) = desired else { return Ok(()); };
+        .send()
+        .await?
+        .error_for_status()?
+        .json()
+        .await?;
+    let Some(target) = desired else {
+        return Ok(());
+    };
     if latest_state.active_version.as_deref() == Some(&target.version)
-        || latest_state.last_attempted_version.as_deref() == Some(&target.version) {
+        || latest_state.last_attempted_version.as_deref() == Some(&target.version)
+    {
         return Ok(());
     }
     if !valid_digest(&target.sha256) {
         return Err("Desired artifact digest is invalid".into());
     }
-    let artifact_path = agent.state_root.join("cache").join(target.sha256.to_ascii_lowercase());
+    let artifact_path = agent
+        .state_root
+        .join("cache")
+        .join(target.sha256.to_ascii_lowercase());
     if !valid_cached_artifact(&artifact_path, &target.sha256) {
         let configured_peers = std::env::var("FLEETFORGE_PEERS").unwrap_or_default();
-        let mut sources: Vec<String> = configured_peers.split(',')
-            .map(str::trim).filter(|endpoint| !endpoint.is_empty())
-            .map(str::to_owned).collect();
+        let mut sources: Vec<String> = configured_peers
+            .split(',')
+            .map(str::trim)
+            .filter(|endpoint| !endpoint.is_empty())
+            .map(str::to_owned)
+            .collect();
         sources.push(hub_url.to_owned());
         let mut downloaded = false;
         for source in sources {
             let artifact_url = if source == hub_url {
                 format!("{source}/api/artifacts/{}", target.sha256)
             } else {
-                format!("{}/api/artifacts/{}", source.trim_end_matches('/'), target.sha256)
+                format!(
+                    "{}/api/artifacts/{}",
+                    source.trim_end_matches('/'),
+                    target.sha256
+                )
             };
             let response = client.get(artifact_url).bearer_auth(token).send().await;
-            let Ok(response) = response else { continue; };
-            let Ok(response) = response.error_for_status() else { continue; };
-            let Ok(content) = response.bytes().await else { continue; };
-            if content.len() > 100 * 1024 * 1024 { continue; }
+            let Ok(response) = response else {
+                continue;
+            };
+            let Ok(response) = response.error_for_status() else {
+                continue;
+            };
+            let Ok(content) = response.bytes().await else {
+                continue;
+            };
+            if content.len() > 100 * 1024 * 1024 {
+                continue;
+            }
             let pending_path = artifact_path.with_extension("download");
             fs::write(&pending_path, &content)?;
             if valid_cached_artifact(&pending_path, &target.sha256) {
@@ -202,42 +265,74 @@ async fn reconcile_once(
         fs::set_permissions(&artifact_path, fs::Permissions::from_mode(0o755))?;
     }
     let deployment_engine = Arc::clone(&agent.engine);
-    let deployed_state = tokio::task::spawn_blocking(move || -> Result<RobotState, Box<dyn std::error::Error + Send + Sync>> {
-        let mut engine = deployment_engine.lock().map_err(|_| "Agent state lock poisoned")?;
-        Ok(engine.deploy(target.local_request(artifact_path))?)
-    }).await??;
-    client.post(format!("{hub_url}/api/heartbeat"))
+    let deployed_state = tokio::task::spawn_blocking(
+        move || -> Result<RobotState, Box<dyn std::error::Error + Send + Sync>> {
+            let mut engine = deployment_engine
+                .lock()
+                .map_err(|_| "Agent state lock poisoned")?;
+            Ok(engine.deploy(target.local_request(artifact_path))?)
+        },
+    )
+    .await??;
+    client
+        .post(format!("{hub_url}/api/heartbeat"))
         .bearer_auth(token)
-        .json(&AgentHeartbeat { state: deployed_state, endpoint: Some(format!("http://{}", agent.listen_address)) })
-        .send().await?.error_for_status()?;
+        .json(&AgentHeartbeat {
+            state: deployed_state,
+            endpoint: Some(format!("http://{}", agent.listen_address)),
+        })
+        .send()
+        .await?
+        .error_for_status()?;
     Ok(())
 }
 
 fn valid_cached_artifact(artifact_path: &Path, expected_digest: &str) -> bool {
-    artifact_path.is_file() && sha256_file(artifact_path)
-        .is_ok_and(|digest| digest.eq_ignore_ascii_case(expected_digest))
+    artifact_path.is_file()
+        && sha256_file(artifact_path)
+            .is_ok_and(|digest| digest.eq_ignore_ascii_case(expected_digest))
 }
 
 fn valid_digest(digest: &str) -> bool {
-    digest.len() == 64 && digest.bytes().all(|character| character.is_ascii_hexdigit())
+    digest.len() == 64
+        && digest
+            .bytes()
+            .all(|character| character.is_ascii_hexdigit())
 }
 
 fn authorized(headers: &HeaderMap, agent: &AgentRuntime) -> Result<(), ApiFailure> {
     if let Some(token) = agent.token.as_ref() {
-        let supplied = headers.get(header::AUTHORIZATION).and_then(|header| header.to_str().ok());
+        let supplied = headers
+            .get(header::AUTHORIZATION)
+            .and_then(|header| header.to_str().ok());
         if supplied != Some(format!("Bearer {token}").as_str()) {
-            return Err((StatusCode::UNAUTHORIZED, Json(ApiError { message: "Invalid fleet token".to_owned() })));
+            return Err((
+                StatusCode::UNAUTHORIZED,
+                Json(ApiError {
+                    message: "Invalid fleet token".to_owned(),
+                }),
+            ));
         }
     }
     Ok(())
 }
 
 fn internal_error(message: &str) -> ApiFailure {
-    (StatusCode::INTERNAL_SERVER_ERROR, Json(ApiError { message: message.to_owned() }))
+    (
+        StatusCode::INTERNAL_SERVER_ERROR,
+        Json(ApiError {
+            message: message.to_owned(),
+        }),
+    )
 }
 
 fn bad_request(message: &str) -> ApiFailure {
-    (StatusCode::BAD_REQUEST, Json(ApiError { message: message.to_owned() }))
+    (
+        StatusCode::BAD_REQUEST,
+        Json(ApiError {
+            message: message.to_owned(),
+        }),
+    )
 }
 
 async fn supervise_loop(agent: SharedAgent) {
@@ -252,7 +347,10 @@ async fn supervise_loop(agent: SharedAgent) {
         };
         match desired_process {
             Ok(Some((version, release_root, command))) => {
-                if current_process.as_ref().is_some_and(|(running_version, _)| running_version != &version) {
+                if current_process
+                    .as_ref()
+                    .is_some_and(|(running_version, _)| running_version != &version)
+                {
                     if let Some((_, mut process)) = current_process.take() {
                         let _ = process.kill().await;
                         let _ = process.wait().await;
@@ -263,10 +361,14 @@ async fn supervise_loop(agent: SharedAgent) {
                         .args(&command[1..])
                         .current_dir(&release_root)
                         .kill_on_drop(true)
-                        .spawn() {
+                        .spawn()
+                    {
                         Ok(process) => current_process = Some((version.clone(), process)),
                         Err(spawn_error) => {
-                            eprintln!("{}: release {version} launch failed: {spawn_error}", agent.robot_id);
+                            eprintln!(
+                                "{}: release {version} launch failed: {spawn_error}",
+                                agent.robot_id
+                            );
                             record_runtime_failure(&agent, &version);
                         }
                     }
@@ -278,18 +380,27 @@ async fn supervise_loop(agent: SharedAgent) {
                     let _ = process.wait().await;
                 }
             }
-            Err(read_error) => eprintln!("{}: supervisor manifest error: {read_error}", agent.robot_id),
+            Err(read_error) => eprintln!(
+                "{}: supervisor manifest error: {read_error}",
+                agent.robot_id
+            ),
         }
         if let Some((version, process)) = current_process.as_mut() {
             match process.try_wait() {
                 Ok(Some(exit_status)) => {
-                    eprintln!("{}: runtime {version} exited: {exit_status}", agent.robot_id);
+                    eprintln!(
+                        "{}: runtime {version} exited: {exit_status}",
+                        agent.robot_id
+                    );
                     let failed_version = version.clone();
                     record_runtime_failure(&agent, &failed_version);
                     current_process = None;
                 }
                 Err(wait_error) => {
-                    eprintln!("{}: runtime process check failed: {wait_error}", agent.robot_id);
+                    eprintln!(
+                        "{}: runtime process check failed: {wait_error}",
+                        agent.robot_id
+                    );
                     let failed_version = version.clone();
                     record_runtime_failure(&agent, &failed_version);
                     current_process = None;
@@ -305,7 +416,10 @@ fn record_runtime_failure(agent: &AgentRuntime, version: &str) {
     match agent.engine.lock() {
         Ok(mut engine) => {
             if let Err(recovery_error) = engine.mark_runtime_failure(version) {
-                eprintln!("{}: runtime failure recovery error: {recovery_error}", agent.robot_id);
+                eprintln!(
+                    "{}: runtime failure recovery error: {recovery_error}",
+                    agent.robot_id
+                );
             }
         }
         Err(_) => eprintln!("{}: unable to record runtime failure", agent.robot_id),

@@ -33,9 +33,12 @@ fn release_request(binary_path: &Path, version: &str) -> DeploymentRequest {
 }
 
 fn apply_first_release(test_root: &TempDir) -> DeploymentEngine {
-    let mut robot_agent = DeploymentEngine::open(test_root.path().join("robot-state"), "robot-1").unwrap();
+    let mut robot_agent =
+        DeploymentEngine::open(test_root.path().join("robot-state"), "robot-1").unwrap();
     let healthy_binary = write_test_binary(test_root.path(), "1.0.0", true);
-    let deployed_state = robot_agent.deploy(release_request(&healthy_binary, "1.0.0")).unwrap();
+    let deployed_state = robot_agent
+        .deploy(release_request(&healthy_binary, "1.0.0"))
+        .unwrap();
     assert_eq!(deployed_state.phase, DeploymentPhase::Healthy);
     robot_agent
 }
@@ -46,8 +49,12 @@ fn healthy_release_becomes_active_and_survives_restart() {
     let robot_agent = apply_first_release(&test_root);
     assert_eq!(robot_agent.state().active_version.as_deref(), Some("1.0.0"));
 
-    let restarted_agent = DeploymentEngine::open(test_root.path().join("robot-state"), "robot-1").unwrap();
-    assert_eq!(restarted_agent.state().active_version.as_deref(), Some("1.0.0"));
+    let restarted_agent =
+        DeploymentEngine::open(test_root.path().join("robot-state"), "robot-1").unwrap();
+    assert_eq!(
+        restarted_agent.state().active_version.as_deref(),
+        Some("1.0.0")
+    );
 }
 
 #[test]
@@ -56,7 +63,9 @@ fn failed_health_check_restores_previous_release() {
     let mut robot_agent = apply_first_release(&test_root);
     let unhealthy_binary = write_test_binary(test_root.path(), "2.0.0", false);
 
-    let deployed_state = robot_agent.deploy(release_request(&unhealthy_binary, "2.0.0")).unwrap();
+    let deployed_state = robot_agent
+        .deploy(release_request(&unhealthy_binary, "2.0.0"))
+        .unwrap();
     assert_eq!(deployed_state.phase, DeploymentPhase::RolledBack);
     assert_eq!(deployed_state.active_version.as_deref(), Some("1.0.0"));
     assert_eq!(deployed_state.pending_version, None);
@@ -87,11 +96,19 @@ fn startup_recovers_interrupted_activation() {
     stored_state.phase = DeploymentPhase::Activating;
 
     let state_path = test_root.path().join("robot-state/state.json");
-    fs::write(state_path, serde_json::to_vec_pretty(&stored_state).unwrap()).unwrap();
-    let recovered_agent = DeploymentEngine::open(test_root.path().join("robot-state"), "robot-1").unwrap();
+    fs::write(
+        state_path,
+        serde_json::to_vec_pretty(&stored_state).unwrap(),
+    )
+    .unwrap();
+    let recovered_agent =
+        DeploymentEngine::open(test_root.path().join("robot-state"), "robot-1").unwrap();
 
     assert_eq!(recovered_agent.state().phase, DeploymentPhase::Recovered);
-    assert_eq!(recovered_agent.state().active_version.as_deref(), Some("1.0.0"));
+    assert_eq!(
+        recovered_agent.state().active_version.as_deref(),
+        Some("1.0.0")
+    );
     assert_eq!(recovered_agent.state().pending_version, None);
 }
 
@@ -104,11 +121,19 @@ fn startup_preserves_active_release_if_interrupted_during_staging() {
     stored_state.phase = DeploymentPhase::Staging;
 
     let state_path = test_root.path().join("robot-state/state.json");
-    fs::write(state_path, serde_json::to_vec_pretty(&stored_state).unwrap()).unwrap();
-    let recovered_agent = DeploymentEngine::open(test_root.path().join("robot-state"), "robot-1").unwrap();
+    fs::write(
+        state_path,
+        serde_json::to_vec_pretty(&stored_state).unwrap(),
+    )
+    .unwrap();
+    let recovered_agent =
+        DeploymentEngine::open(test_root.path().join("robot-state"), "robot-1").unwrap();
 
     assert_eq!(recovered_agent.state().phase, DeploymentPhase::Recovered);
-    assert_eq!(recovered_agent.state().active_version.as_deref(), Some("1.0.0"));
+    assert_eq!(
+        recovered_agent.state().active_version.as_deref(),
+        Some("1.0.0")
+    );
 }
 
 #[test]
@@ -136,10 +161,18 @@ fn startup_cleans_orphaned_staging_artifacts() {
     fs::create_dir(&orphaned_staging).unwrap();
     fs::create_dir(&orphaned_release).unwrap();
     let state_path = test_root.path().join("robot-state/state.json");
-    fs::write(state_path, serde_json::to_vec_pretty(&stored_state).unwrap()).unwrap();
+    fs::write(
+        state_path,
+        serde_json::to_vec_pretty(&stored_state).unwrap(),
+    )
+    .unwrap();
 
-    let recovered_agent = DeploymentEngine::open(test_root.path().join("robot-state"), "robot-1").unwrap();
-    assert_eq!(recovered_agent.state().active_version.as_deref(), Some("1.0.0"));
+    let recovered_agent =
+        DeploymentEngine::open(test_root.path().join("robot-state"), "robot-1").unwrap();
+    assert_eq!(
+        recovered_agent.state().active_version.as_deref(),
+        Some("1.0.0")
+    );
     assert!(!orphaned_staging.exists());
     assert!(!orphaned_release.exists());
 }
@@ -175,8 +208,18 @@ fn runtime_failure_reverts_active_version() {
     let second_binary = write_test_binary(test_root.path(), "2.0.0", true);
     let mut deployment = release_request(&second_binary, "2.0.0");
     deployment.run_command = Some(vec!["robot-app".to_owned(), "--serve".to_owned()]);
-    assert_eq!(robot_agent.deploy(deployment).unwrap().phase, DeploymentPhase::Healthy);
+    assert_eq!(
+        robot_agent.deploy(deployment).unwrap().phase,
+        DeploymentPhase::Healthy
+    );
     let command = robot_agent.active_run_command().unwrap().unwrap();
     assert_eq!(command.0, "2.0.0");
-    assert_eq!(robot_agent.mark_runtime_failure("2.0.0").unwrap().active_version.as_deref(), Some("1.0.0"));
+    assert_eq!(
+        robot_agent
+            .mark_runtime_failure("2.0.0")
+            .unwrap()
+            .active_version
+            .as_deref(),
+        Some("1.0.0")
+    );
 }
