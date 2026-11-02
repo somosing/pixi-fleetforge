@@ -1,6 +1,18 @@
-# Optional RoboStack ROS 2 Jazzy health demonstration
+# RoboStack ROS 2 Jazzy heartbeat experiment
 
-This environment is separate from the already verified lightweight Python robot demo. It is intentionally not included in the default Rust CI or in Pixi environment archives until Linux resolution and runtime checks are verified.
+This is a **standalone verification of a Pixi-managed ROS 2 runtime**. It is not yet a FleetForge-controlled process and is not packaged into a FleetForge release. The already-tested `robot-demo/pixi.toml` packages a lightweight Python environment only.
+
+## Reproducible test on Ubuntu x86-64
+
+From the repository root:
+
+```bash
+bash scripts/verify-ros2-heartbeat.sh
+```
+
+The script resolves the ROS 2 Jazzy environment through Pixi, imports `rclpy` and `std_msgs`, runs `heartbeat_node.py`, and waits for `ros_health_probe.py` to observe a `healthy` message on `/fleetforge/health` (default `ROS_DOMAIN_ID=94`). It fails if dependencies cannot resolve, the publisher exits prematurely, or no matching message is received. It prints the publisher log on failure.
+
+You can also run the publisher and health probe manually in separate terminals:
 
 ```bash
 cd robot-demo/ros2
@@ -8,14 +20,19 @@ pixi install
 pixi run publisher
 ```
 
-From another terminal in the same directory:
-
 ```bash
+cd robot-demo/ros2
 pixi run health
 ```
 
-The publisher emits `std_msgs/String` messages on `/fleetforge/health`; the probe exits successfully only after receiving `healthy` within five seconds.
+The test covers **ROS 2 pub/sub connectivity inside a Pixi environment**. It does not validate a packaged application, FleetForge's process supervisor, authenticated fleet membership, ROS network partitions, or physical robots. The base environment may be large; check the size before attempting hub uploads (current demo artifact API has a 100 MiB limit).
 
-Once the environment is packed and unpacked in a release, a suitable explicit release health contract is `env/bin/python ros_health_probe.py` **only if** the publisher is started as part of the application lifecycle and the probe script is packaged into the release. FleetForge's current archive example only packages Python. The ROS 2 packages, health scripts and launch order still need integration verification on your Ubuntu machine.
+## Engineering questions
 
-Reference: https://robostack.github.io/GettingStarted.html
+- Does the locked environment resolve in a clean clone?
+- Are `rclpy` and `std_msgs` usable through `pixi run` without sourcing a system-wide ROS installation?
+- Can the publisher and subscriber communicate under an isolated `ROS_DOMAIN_ID`?
+- What does a missing middleware dependency look like in diagnostic logs?
+- How much disk space would a packed ROS 2 runtime require, and does that exceed the current artifact API limit?
+
+The [`pixi-build-ros` backend](https://pixi.prefix.dev/latest/build/backends/pixi-build-ros/) offers automatic ROS dependency mapping but is still in preview. Do not claim Pixi lacks ROS dependency mapping. The older ROS 2 tutorial's statement that `rosdep` itself is unsupported is a separate point.
