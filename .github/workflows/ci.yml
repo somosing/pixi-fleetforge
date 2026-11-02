@@ -18,6 +18,8 @@ jobs:
         run: cargo clippy --workspace --all-targets -- -D warnings
       - name: Unit and integration tests
         run: cargo test --workspace
+      - name: ROS 2 smoke script syntax
+        run: bash -n scripts/verify-ros2-heartbeat.sh
       - name: Original three-agent regression
         run: bash scripts/demo.sh
       - name: Desired-state rollout and rollback
