@@ -4,10 +4,15 @@
 
 FleetForge is a **local Linux engineering prototype** built to explore reproducible software deployments across multiple robot agents, with failure-aware release activation and recovery. It is not a production robotics system and has not been tested on physical hardware.
 
-## Status at package delivery
+## Verified prototype status (2 November 2026)
 
-- v0.1 baseline: user validated **7 Rust tests**, Rust formatting/Clippy, the three-agent rollback demo, Pixi environment packaging and a real unpacked Python 3.13.18 release. Published at [somosing/pixi-fleetforge](https://github.com/somosing/pixi-fleetforge).
-- Expanded package: new hub, reconciliation loop, remote hash-verified artifacts, peer-assisted HTTP fetch, release health timeouts, optional application supervision, SvelteKit dashboard, Rust integration tests, demo scripts, optional RoboStack ROS 2 heartbeat, and standalone libp2p gossip experiment. **Not yet compiled or tested end-to-end in this package-generation environment.** Validate locally before pushing.
+- **[v0.2.0](https://github.com/somosing/pixi-fleetforge/tree/v0.2.0):** 10 Rust tests passed; formatting, Clippy, fleet demonstrations, and SvelteKit checks/build all passed GitHub Actions CI.
+- **Fleet control:** a three-agent local rollout succeeded; a deliberately unhealthy v2 release on robot 3 rolled back to v1. Hash-verified peer-assisted HTTP artifact retrieval was exercised successfully.
+- **Pixi artifact:** a 44.93 MiB lightweight Python environment was packed, SHA-256 checked, unpacked, and health-checked on Ubuntu (Python 3.13.18). This does **not** demonstrate a full robot application deployment.
+- **Networking and UI:** two separate libp2p Gossipsub peers exchanged messages bidirectionally; the SvelteKit dashboard displayed live state from a local hub.
+- **ROS 2 Jazzy:** a separate Pixi-managed RoboStack publisher and subscriber successfully exchanged a `/fleetforge/health` heartbeat on Ubuntu using `bash scripts/verify-ros2-heartbeat.sh`. Its dependency lockfile is committed. This is **not yet a FleetForge-managed ROS deployment**.
+
+See [validation results](docs/validation-results.md) for the scope and limits of each test.
 
 ## Architecture
 
@@ -45,7 +50,7 @@ pixi run demo-full
 pixi run demo-peer
 ```
 
-The expanded Rust workspace adds crates, so it may update `Cargo.lock`. Apply the downloaded source using [UPGRADE.md](UPGRADE.md) rather than replacing your existing Git history. Commit both Pixi and Cargo lockfiles after successful resolution. The GitHub Actions workflow checks formatting, Clippy, tests, demos, and the dashboard build.
+The Rust and Pixi lockfiles are committed. GitHub Actions validates formatting, Clippy, Rust tests, fleet demos, and the dashboard build. The separate ROS 2 smoke test is run manually on Ubuntu; it is not part of the default CI.
 
 ## Local fleet control demo
 
@@ -123,13 +128,14 @@ Open `http://127.0.0.1:5173`, connect to your locally running hub, and enter the
 
 ## Optional research components
 
-- `robot-demo/ros2`: independent RoboStack Jazzy Pixi environment, a ROS 2 heartbeat publisher and a five-second health probe. **Not yet integrated into a packaged release lifecycle.**
+- `robot-demo/ros2`: independent RoboStack Jazzy Pixi environment. Its heartbeat publisher/subscriber test passed on Ubuntu and its lockfile is committed. **Not yet integrated into a packaged FleetForge release lifecycle.**
 - `experiments/fleet-gossip`: standalone Rust libp2p signed-gossipsub peer lab. **Not integrated into FleetForge's authority or artifact path.** Its peer identities are ephemeral and do not establish fleet authorization.
 
 ## Documentation
 
 - [Architecture, control and deployment flow](docs/architecture.md)
 - [Failure cases and verification matrix](docs/failure-model.md)
+- [Verified prototype results and limitations](docs/validation-results.md)
 - [Pixi experiments and improvement worksheet](docs/pixi-experiments.md)
 - [ROS 2 optional experiment](robot-demo/ros2/README.md)
 - [libp2p gossip experiment](experiments/fleet-gossip/README.md)
