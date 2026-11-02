@@ -1,0 +1,7 @@
+/target/
+/.pixi/
+/state/
+*.tar
+*.log
+.DS_Store
+/robot-demo/pixi-release.json
