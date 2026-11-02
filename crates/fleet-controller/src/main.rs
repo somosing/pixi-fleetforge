@@ -50,7 +50,11 @@ async fn dispatch_requests(
         let agent_address = agent_address.trim_end_matches('/').to_owned();
         let agent_http_client = http_client.clone();
         let agent_manifest = manifest_json.clone();
-        let target_endpoint = if http_method == "POST" { "deploy" } else { "state" };
+        let target_endpoint = if http_method == "POST" {
+            "deploy"
+        } else {
+            "state"
+        };
         let endpoint_url = format!("{agent_address}/{target_endpoint}");
         let is_deployment = http_method == "POST";
 

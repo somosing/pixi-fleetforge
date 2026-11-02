@@ -49,8 +49,12 @@ async fn health_check() -> StatusCode {
     StatusCode::OK
 }
 
-async fn get_state(State(shared_engine): State<SharedEngine>) -> Result<Json<RobotState>, ApiFailure> {
-    let deployment_engine = shared_engine.lock().map_err(|_| internal_error("Agent state lock poisoned"))?;
+async fn get_state(
+    State(shared_engine): State<SharedEngine>,
+) -> Result<Json<RobotState>, ApiFailure> {
+    let deployment_engine = shared_engine
+        .lock()
+        .map_err(|_| internal_error("Agent state lock poisoned"))?;
     Ok(Json(deployment_engine.state()))
 }
 
@@ -59,22 +63,36 @@ async fn deploy_release(
     Json(deployment): Json<DeploymentRequest>,
 ) -> Result<Json<RobotState>, ApiFailure> {
     tokio::task::spawn_blocking(move || {
-        let mut deployment_engine = shared_engine.lock()
+        let mut deployment_engine = shared_engine
+            .lock()
             .map_err(|_| internal_error("Agent state lock poisoned"))?;
 
-        deployment_engine.deploy(deployment).map(Json).map_err(|deployment_error| {
-            let status_code = if deployment_error.is_invalid_request() {
-                StatusCode::BAD_REQUEST
-            } else {
-                StatusCode::INTERNAL_SERVER_ERROR
-            };
-            (status_code, Json(ApiError { message: deployment_error.to_string() }))
-        })
+        deployment_engine
+            .deploy(deployment)
+            .map(Json)
+            .map_err(|deployment_error| {
+                let status_code = if deployment_error.is_invalid_request() {
+                    StatusCode::BAD_REQUEST
+                } else {
+                    StatusCode::INTERNAL_SERVER_ERROR
+                };
+                (
+                    status_code,
+                    Json(ApiError {
+                        message: deployment_error.to_string(),
+                    }),
+                )
+            })
     })
     .await
     .map_err(|worker_error| internal_error(&format!("Deployment task failed: {worker_error}")))?
 }
 
 fn internal_error(description: &str) -> ApiFailure {
-    (StatusCode::INTERNAL_SERVER_ERROR, Json(ApiError { message: description.to_owned() }))
+    (
+        StatusCode::INTERNAL_SERVER_ERROR,
+        Json(ApiError {
+            message: description.to_owned(),
+        }),
+    )
 }

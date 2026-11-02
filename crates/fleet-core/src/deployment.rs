@@ -125,7 +125,10 @@ impl DeploymentEngine {
             if engine.robot_state.phase == DeploymentPhase::Activating {
                 engine.robot_state.active_version = engine.robot_state.previous_version.clone();
             } else if engine.robot_state.phase == DeploymentPhase::Staging {
-                let orphaned_release = engine.state_root.join("releases").join(&interrupted_version);
+                let orphaned_release = engine
+                    .state_root
+                    .join("releases")
+                    .join(&interrupted_version);
                 if orphaned_release.exists() {
                     fs::remove_dir_all(orphaned_release)?;
                 }
@@ -150,10 +153,7 @@ impl DeploymentEngine {
         self.robot_state.clone()
     }
 
-    pub fn deploy(
-        &mut self,
-        deployment: DeploymentRequest,
-    ) -> Result<RobotState, DeploymentError> {
+    pub fn deploy(&mut self, deployment: DeploymentRequest) -> Result<RobotState, DeploymentError> {
         validate_identifier(&deployment.version)?;
         validate_digest(&deployment.sha256)?;
 
@@ -290,7 +290,10 @@ pub fn sha256_file(binary_path: &Path) -> Result<String, DeploymentError> {
 }
 
 fn validate_identifier(identifier: &str) -> Result<(), DeploymentError> {
-    let valid_start = identifier.chars().next().is_some_and(|letter| letter.is_ascii_alphanumeric());
+    let valid_start = identifier
+        .chars()
+        .next()
+        .is_some_and(|letter| letter.is_ascii_alphanumeric());
     let valid_characters = identifier
         .chars()
         .all(|letter| letter.is_ascii_alphanumeric() || matches!(letter, '-' | '_' | '.'));
