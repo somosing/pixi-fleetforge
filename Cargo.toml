@@ -1,9 +1,9 @@
 [workspace]
-members = ["crates/fleet-core", "crates/fleet-agent", "crates/fleet-controller"]
+members = ["crates/fleet-core", "crates/fleet-agent", "crates/fleet-controller", "crates/fleet-hub"]
 resolver = "2"
 
 [workspace.package]
-version = "0.1.0"
+version = "0.2.0"
 edition = "2021"
 license = "MIT"
 repository = "https://github.com/somosing/pixi-fleetforge"
@@ -11,4 +11,4 @@ repository = "https://github.com/somosing/pixi-fleetforge"
 [workspace.dependencies]
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
-tokio = { version = "1", features = ["rt-multi-thread", "macros", "net"] }
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "net", "time", "process"] }

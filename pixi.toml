@@ -1,12 +1,13 @@
 [workspace]
 name = "pixi-fleetforge"
-version = "0.1.0"
+version = "0.2.0"
 description = "Fault-aware robot software deployment prototype"
 channels = ["conda-forge"]
 platforms = ["linux-64"]
 
 [dependencies]
 rust = ">=1.85,<2"
+nodejs = ">=22.12,<23"
 
 [tasks]
 build = "cargo build --workspace"
@@ -15,3 +16,5 @@ check = "cargo check --workspace"
 fmt = "cargo fmt --all -- --check"
 clippy = "cargo clippy --workspace --all-targets -- -D warnings"
 demo = "bash scripts/demo.sh"
+demo-full = "bash scripts/demo-v02.sh"
+demo-peer = "bash scripts/demo-peer-cache.sh"

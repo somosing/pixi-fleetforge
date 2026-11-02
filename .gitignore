@@ -5,3 +5,13 @@
 *.log
 .DS_Store
 /robot-demo/pixi-release.json
+
+/dashboard/node_modules/
+/dashboard/.svelte-kit/
+/dashboard/build/
+/dashboard/.vite/
+/experiments/fleet-gossip/target/
+/robot-demo/ros2/.pixi/
+**/__pycache__/
+*.pyc
+/dashboard/package-lock.json.old

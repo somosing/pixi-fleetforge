@@ -1,4 +1,4 @@
-name: Rust checks
+name: FleetForge validation
 
 on:
   push:
@@ -12,11 +12,32 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: clippy, rustfmt
-      - name: Check formatting
+      - name: Format
         run: cargo fmt --all -- --check
-      - name: Lint
+      - name: Clippy
         run: cargo clippy --workspace --all-targets -- -D warnings
-      - name: Test
+      - name: Unit and integration tests
         run: cargo test --workspace
-      - name: Three-agent failure demonstration
+      - name: Original three-agent regression
         run: bash scripts/demo.sh
+      - name: Desired-state rollout and rollback
+        run: bash scripts/demo-v02.sh
+      - name: Peer artifact retrieval
+        run: bash scripts/demo-peer-cache.sh
+
+  dashboard:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: dashboard
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Install dashboard dependencies
+        run: npm install
+      - name: Validate Svelte types
+        run: npm run check
+      - name: Build dashboard
+        run: npm run build

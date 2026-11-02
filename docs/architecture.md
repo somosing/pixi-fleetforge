@@ -1,51 +1,56 @@
-# Architecture
+# FleetForge architecture and data flow
 
-## Scope
-
-FleetForge v0.1 is a **local Linux proof of concept**. Three independently running robot agents expose loopback HTTP endpoints. A Rust controller submits release manifests and gathers state concurrently.
+## Components
 
 ```text
-                     fleet-controller
-                  /deploy       /state
-                      HTTP (loopback)
-                   /      |      \
-            fleet-agent fleet-agent fleet-agent
-              robot-1     robot-2     robot-3
-                 |           |           |
-              state.json   state.json   state.json
-              releases/    releases/    releases/
+SvelteKit operator dashboard (127.0.0.1:5173)
+    |  Bearer token, browser fetch
+    v
+fleet-hub HTTP API (127.0.0.1:4500)
+    |-- desired state / robot observations (persistent JSON)
+    |-- SHA-256 addressed artifact registry
+    |              ^
+    v              | optional peer cache fallback
+fleet-agent -------+------> fleet-agent
+    |                           |
+    | deployment engine         | deployment engine
+    | release staging           | release staging
+    | health gate               | health gate
+    | local supervisor          | local supervisor
+    v                           v
+last healthy release           last healthy release
 ```
 
-`fleet-core` owns the deployment state machine and SHA-256 verification. The agent handles HTTP requests and executes blocking filesystem/health operations on a Tokio blocking worker. The controller uses concurrent asynchronous HTTP requests.
+All HTTP services bind to loopback. Hub-mode requests use `FLEETFORGE_TOKEN`. This is **not secure multi-host deployment**. The standalone libp2p gossip experiment demonstrates signed pub/sub messages, but is not an authority for deployments and is not connected to production agents.
 
-## Deployment sequence
+## Desired-state reconciliation
 
-1. Validate the release identifier and SHA-256 format.
-2. Persist `pending_version` with the `staging` phase.
-3. Copy the artifact into `releases/.VERSION.staging/`.
-4. Hash the staged artifact; reject on mismatch.
-5. For `pixi_archive`, run `pixi-unpack` and require `env/bin/python` to exist.
-6. Rename the staged directory to `releases/VERSION/`.
-7. Persist the new `active_version` as `activating`, retaining the previous version.
-8. Run `robot-app --health-check` for an executable, or `env/bin/python --version` for a Pixi archive.
-9. Persist `healthy` on success, or restore the previous active version and persist `rolled_back` on failure.
+1. The operator publishes an artifact to the hub by SHA-256. The hub re-hashes uploaded bytes.
+2. A rollout request records each robot's desired version and artifact digest in the hub's persistent registry.
+3. Agents send heartbeats with their current phase, version, and endpoint every 4 seconds while the hub is reachable.
+4. Each agent polls its desired state. If already healthy or previously attempted for that immutable version, it does not retry.
+5. The agent checks its local cache, configured HTTP peers, then the hub for matching bytes. Every candidate is verified against the digest.
+6. The deployment engine stages the release and validates its health command within the requested timeout.
+7. On success, the active version becomes healthy and the optional runtime command is supervised. On health failure, the previous active version is selected.
+8. If the hub becomes unavailable, agents retain the last active release. Heartbeat and desired-state fetching resume on reconnect.
 
-The `state.json.tmp` -> `state.json` rename makes a single robot's version pointer switch atomic on Linux filesystems supporting atomic rename within one directory. The file and containing directory are synchronized. This is **not** a multi-node transaction or an atomic replacement of a running ROS 2 process.
+This is polling-based reconciliation, **not** a CRDT, consensus algorithm, or multi-node transaction. The controller remains the sole desired-state authority.
 
-## Crash recovery
+## Local deployment phases
 
-On startup, a persisted `pending_version` signals interrupted work. During `staging`, the prior active version remains intact. During `activating`, the agent restores `previous_version`. The new agent persists the recovered state before accepting requests.
+- `staging`: save pending version; copy and validate artifact; unpack Pixi environments.
+- `activating`: persist candidate pointer and run its release health contract.
+- `healthy`: complete health validation.
+- `rejected`: reject incompatible, missing, or digest-mismatched artifact without changing the working release.
+- `rolled_back`: failed health validation or supervised application exit; previous version selected.
+- `recovered`: interrupted deployment reconciled when the agent restarts.
 
-Interrupted staging cleans the hidden staging directory and any uncommitted release directory during recovery. A previously completed (including failed health-check) release directory is immutable and must use a new version identifier if rebuilt.
+State is synchronized to disk through `state.json.tmp` → `state.json` rename and directory sync. This is a local metadata transition, **not** atomic process replacement. A process supervisor runs a configured release command after activation, and selects the previous active version if that command exits. There is no supervisor process that survives agent termination.
 
-## Pixi relation
+## Content-addressed artifacts
 
-The root `pixi.toml` provides a reproducible Rust toolchain specification and development commands. The robot demo has its own Pixi environment manifest. `pixi-pack` archives a concrete Python environment; FleetForge verifies its SHA-256 and calls `pixi-unpack` on the robot agent before checking the unpacked interpreter. See `scripts/pack-robot-demo.sh`.
+The hub stores artifact bytes by SHA-256. Agents keep verified cached copies at `state/<robot>/cache/<digest>`. An agent can serve its cache to a configured peer with the same bearer token; this demonstrates peer-assisted distribution without relying on libp2p. The `experiments/fleet-gossip/` tool is an independent research experiment for future discovery/state announcements.
 
-The current Pixi health check verifies the interpreter starts, **not** a ROS 2 node or whole-robot operational readiness. ROS 2 diagnostics are planned.
+## Security boundary
 
-## Boundaries
-
-The controller is the sole caller in the local demonstration but is not an authenticated authority. There is no persistent queue, artifact cache, content-addressed peer store, gossip protocol, HTTP authentication, signature verification, concurrency limit, deployment timeout, watchdog, frontend or production-grade process supervision. Network faults are observed as request failures, not healed through peer networking.
-
-Do not expose these agent endpoints outside the local host. The manifest refers to files on the **agent's** filesystem and the agent executes staged binaries after checking only a caller-supplied hash. A hash alone is not authenticity. Production use requires publisher signatures and explicit release authorization.
+The prototype has one shared bearer token, loopback-only listeners, no TLS, no operator RBAC, no signed publisher manifests, no rate limits or quotas, no network-wide identity/authorization, and no sandbox for executing downloaded programs. Digest integrity is **not** proof of publisher authenticity. Do not expose its HTTP endpoints to public networks, containers with untrusted tenants, or physical robots.
